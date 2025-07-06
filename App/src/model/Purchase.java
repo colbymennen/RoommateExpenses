@@ -23,11 +23,25 @@ public class Purchase implements Serializable {
         this.items = new ArrayList<>();
     }
 
-    public String getBuyer() { return buyer; }
-    public String getStore() { return store; }
-    public Date getDate() { return date; }
-    public double getTotalCost() { return totalCost; }
-    public List<Item> getItems() { return items; }
+    public String getBuyer() {
+        return buyer;
+    }
+    
+    public String getStore() {
+        return store;
+    }
+    
+    public Date getDate() {
+        return date;
+    }
+    
+    public double getTotalCost() {
+        return totalCost;
+    }
+    
+    public List<Item> getItems() {
+        return items;
+    }
 
     public void addItem(Item item) {
         items.add(item);

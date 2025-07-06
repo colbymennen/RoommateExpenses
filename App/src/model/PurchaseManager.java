@@ -11,7 +11,7 @@ public class PurchaseManager implements Serializable {
     private List<Purchase> purchases;
 
     // Modify these names as needed for your household
-    public static final String[] ROOMMATES = {"Roommate1", "Roommate2", "Roommate3", "Roommate4"};
+    public static final String[] ROOMMATES = {"Colby", "Khanh", "Casey", "Jehosh"};
 
     public PurchaseManager() {
         purchases = new ArrayList<>();

@@ -21,13 +21,26 @@ public class Item implements Serializable {
         this.splits = new HashMap<>(splits);
     }
 
-    public String getDescription() { return description; }
-    public double getCost() { return cost; }
-    public double getTaxRate() { return taxRate; }
-    public Map<String, Double> getSplits() { return splits; }
+    public String getDescription() {
+        return description; 
+    }
+    
+    public double getCost() {
+        return cost;
+    }
+    
+    public double getTaxRate() {
+        return taxRate;
+    }
+    
+    public Map<String, Double> getSplits() {
+        return splits;
+    }
 
     /**
      * @return total cost including tax
      */
-    public double getTotalCost() { return cost * (1 + taxRate); }
+    public double getTotalCost() {
+        return cost * (1 + taxRate);
+    }
 }
