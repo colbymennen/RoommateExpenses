@@ -5,22 +5,46 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Manages the list of all purchases and defines the set of roommates.
+ * Manages all purchases and defines roommates in the household.
  */
 public class PurchaseManager implements Serializable {
     private List<Purchase> purchases;
 
-    // Modify these names as needed for your household
-    public static final String[] ROOMMATES = {"Colby", "Khanh", "Casey", "Jehosh"};
+    /**
+     * Names of roommates. Modify to match actual users.
+     */
+    public static final String[] ROOMMATES = {
+        "Colby", "Jehosh", "Casey", "Khanh"
+    };
 
+    /**
+     * Constructs an empty PurchaseManager.
+     */
     public PurchaseManager() {
         purchases = new ArrayList<>();
     }
 
+    /**
+     * Adds a purchase.
+     *
+     * @param p the Purchase to add.
+     */
     public void addPurchase(Purchase p) {
         purchases.add(p);
     }
 
+    /**
+     * Removes the purchase at the specified index.
+     *
+     * @param index index of the purchase to remove.
+     */
+    public void removePurchase(int index) {
+        purchases.remove(index);
+    }
+
+    /**
+     * @return the list of all purchases.
+     */
     public List<Purchase> getPurchases() {
         return purchases;
     }
