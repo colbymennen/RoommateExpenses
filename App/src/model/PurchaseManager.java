@@ -5,47 +5,51 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Manages all purchases and defines roommates in the household.
+ * Manages all purchases and the list of roommates.
  */
 public class PurchaseManager implements Serializable {
     private List<Purchase> purchases;
+    private List<String> roommates;
 
-    /**
-     * Names of roommates. Modify to match actual users.
-     */
-    public static final String[] ROOMMATES = {
-        "Colby", "Jehosh", "Casey", "Khanh"
-    };
-
-    /**
-     * Constructs an empty PurchaseManager.
-     */
     public PurchaseManager() {
         purchases = new ArrayList<>();
+        roommates = new ArrayList<>();
+        // Default roommates (customize as needed)
+        roommates.add("Colby");
+        roommates.add("Khanh");
+        roommates.add("Jehosh");
+        roommates.add("Casey");
     }
 
-    /**
-     * Adds a purchase.
-     *
-     * @param p the Purchase to add.
-     */
+    public List<Purchase> getPurchases() {
+        return purchases;
+    }
+
     public void addPurchase(Purchase p) {
         purchases.add(p);
     }
 
-    /**
-     * Removes the purchase at the specified index.
-     *
-     * @param index index of the purchase to remove.
-     */
     public void removePurchase(int index) {
         purchases.remove(index);
     }
 
-    /**
-     * @return the list of all purchases.
-     */
-    public List<Purchase> getPurchases() {
-        return purchases;
+    public List<String> getRoommates() {
+        return roommates;
+    }
+
+    public void addRoommate(String name) {
+        if (!roommates.contains(name)) {
+            roommates.add(name);
+        }
+    }
+
+    public void removeRoommate(String name) {
+        roommates.remove(name);
+        // Remove splits referencing removed roommate
+        for (Purchase p : purchases) {
+            for (Item it : p.getItems()) {
+                it.getSplits().remove(name);
+            }
+        }
     }
 }

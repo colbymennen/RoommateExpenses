@@ -2,56 +2,72 @@ package app;
 
 import model.*;
 import util.DataStore;
+import util.ExportUtil;
 
 import javax.swing.*;
+import javax.swing.event.*;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.event.ListSelectionListener;
+import javax.swing.table.TableRowSorter;
+import javax.swing.RowFilter;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.print.PrinterException;
+import java.io.File;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 /**
- * Main application window for the Roommate Expense Tracker.
+ * Main application window for the Roommate Expense Tracker with extended features.
  */
 public class MainApp extends JFrame {
-    private PurchaseManager manager;
-
     /**
-     * Initializes the main window and loads persisted data.
+     * Adapter for a one-method DocumentListener.
      */
+    private interface SimpleDocumentListener extends DocumentListener {
+        void update();
+        @Override default void insertUpdate(DocumentEvent e)  { update(); }
+        @Override default void removeUpdate(DocumentEvent e)  { update(); }
+        @Override default void changedUpdate(DocumentEvent e) { update(); }
+    }
+
+    private PurchaseManager manager;
+    private DefaultTableModel viewModel;
+    private JTable viewTable;
+    private TableRowSorter<DefaultTableModel> sorter;
+
     public MainApp() {
         super("Roommate Expense Tracker");
         manager = DataStore.load();
         setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(800, 600);
+        setSize(1000, 700);
         initUI();
     }
 
-    /**
-     * Sets up the tabbed interface for New Purchase, View, and Summary.
-     */
     private void initUI() {
         JTabbedPane tabs = new JTabbedPane();
-        tabs.add("New Purchase", createNewPurchasePanel());
+        tabs.add("New Purchase",   createNewPurchasePanel());
         tabs.add("View Purchases", createViewPurchasesPanel());
-        tabs.add("Summary", createSummaryPanel());
-        add(tabs, BorderLayout.CENTER);
+        tabs.add("Summary",        createSummaryPanel());
+        tabs.add("Settings",       createSettingsPanel());
+        add(tabs);
     }
 
-    /**
-     * Panel for entering a new purchase with item-by-item entry.
-     */
+    // ----------------------------------------------------------------
+    // New Purchase panel with item editing, removal, and live sum
+    // ----------------------------------------------------------------
     private JPanel createNewPurchasePanel() {
         JPanel panel = new JPanel(new BorderLayout());
 
-        // Top form
+        // --- Form at top --- //
         JPanel form = new JPanel(new GridLayout(5, 2, 5, 5));
         form.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
         form.add(new JLabel("Buyer:"));
-        JComboBox<String> buyerBox = new JComboBox<>(PurchaseManager.ROOMMATES);
+        JComboBox<String> buyerBox = new JComboBox<>(
+            manager.getRoommates().toArray(new String[0])
+        );
         form.add(buyerBox);
 
         form.add(new JLabel("Store:"));
@@ -59,375 +75,680 @@ public class MainApp extends JFrame {
         form.add(storeField);
 
         form.add(new JLabel("Date:"));
-        JSpinner dateSpinner = new JSpinner(new SpinnerDateModel(new Date(), null, null, java.util.Calendar.DAY_OF_MONTH));
+        JSpinner dateSpinner = new JSpinner(
+            new SpinnerDateModel(new Date(), null, null, Calendar.DAY_OF_MONTH)
+        );
         dateSpinner.setEditor(new JSpinner.DateEditor(dateSpinner, "yyyy-MM-dd"));
         form.add(dateSpinner);
 
         form.add(new JLabel("Total Cost:"));
-        JTextField totalCostField = new JTextField();
-        form.add(totalCostField);
+        JTextField totalField = new JTextField();
+        form.add(totalField);
 
         JButton addItemBtn = new JButton("Add Item");
         form.add(addItemBtn);
+
         panel.add(form, BorderLayout.NORTH);
 
-        // Item list
-        DefaultListModel<Item> listModel = new DefaultListModel<>();
-        JList<Item> itemList = new JList<>(listModel);
+        // --- Center: item list + sum label --- //
+        DefaultListModel<Item> itemModel = new DefaultListModel<>();
+        JList<Item> itemList = new JList<>(itemModel);
         itemList.setCellRenderer(new DefaultListCellRenderer() {
             @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value,
-                                                          int index, boolean isSelected,
-                                                          boolean cellHasFocus) {
-                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            public Component getListCellRendererComponent(
+                    JList<?> list, Object value,
+                    int index, boolean isSelected, boolean cellHasFocus
+            ) {
+                super.getListCellRendererComponent(
+                    list, value, index, isSelected, cellHasFocus
+                );
                 Item it = (Item) value;
-                setText(it.getDescription() + " ($" + String.format("%.2f", it.getTotalCost()) + ")");
+                setText(
+                    it.getDescription() +
+                    " ($" + String.format("%.2f", it.getTotalCost()) + ")"
+                );
                 return this;
             }
         });
-        panel.add(new JScrollPane(itemList), BorderLayout.CENTER);
 
-        // Save button
+        JLabel sumLabel = new JLabel("Current sum: $0.00");
+        sumLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+
+        JPanel center = new JPanel(new BorderLayout());
+        center.add(new JScrollPane(itemList), BorderLayout.CENTER);
+        center.add(sumLabel, BorderLayout.SOUTH);
+        panel.add(center, BorderLayout.CENTER);
+
+        // --- South: item controls + save button --- //
+        JPanel itemCtrls = new JPanel();
+        JButton editItem = new JButton("Edit Item");
+        JButton remItem  = new JButton("Remove Item");
+        itemCtrls.add(editItem);
+        itemCtrls.add(remItem);
+
         JButton saveBtn = new JButton("Save Purchase");
-        panel.add(saveBtn, BorderLayout.SOUTH);
 
-        // Add-item action
+        JPanel south = new JPanel(new BorderLayout());
+        south.add(itemCtrls, BorderLayout.NORTH);
+        south.add(saveBtn, BorderLayout.SOUTH);
+        panel.add(south, BorderLayout.SOUTH);
+
+        // --- Helper: update sum using BigDecimal for internal, format only for display --- //
+        Runnable updateSum = () -> {
+            BigDecimal sum = BigDecimal.ZERO;
+            for (int i = 0; i < itemModel.size(); i++) {
+                sum = sum.add(BigDecimal.valueOf(
+                    itemModel.get(i).getTotalCost()
+                ));
+            }
+            // display as two-decimal string only
+            sumLabel.setText(String.format(
+                "Current sum: $%.2f", sum.doubleValue()
+            ));
+        };
+
+        // --- Actions --- //
         addItemBtn.addActionListener(e -> {
-            Item it = showAddItemDialog();
-            if (it != null) listModel.addElement(it);
+            Item it = showAddItemDialog(null);
+            if (it != null) {
+                itemModel.addElement(it);
+                updateSum.run();
+            }
+        });
+        remItem.addActionListener(e -> {
+            int idx = itemList.getSelectedIndex();
+            if (idx >= 0) {
+                itemModel.remove(idx);
+                updateSum.run();
+            }
+        });
+        editItem.addActionListener(e -> {
+            int idx = itemList.getSelectedIndex();
+            if (idx < 0) return;
+            Item old = itemModel.get(idx);
+            Item repl = showAddItemDialog(old);
+            if (repl != null) {
+                itemModel.set(idx, repl);
+                updateSum.run();
+            }
         });
 
-        // Save-purchase action
         saveBtn.addActionListener(e -> {
+            // parse total as BigDecimal
+            BigDecimal enteredTotal;
+            try {
+                enteredTotal = new BigDecimal(
+                    totalField.getText().trim()
+                );
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Invalid total cost");
+                return;
+            }
+
+            BigDecimal rawSum = BigDecimal.ZERO;
+            for (int i = 0; i < itemModel.size(); i++) {
+                rawSum = rawSum.add(BigDecimal.valueOf(
+                    itemModel.get(i).getTotalCost()
+                ));
+            }
+
+            // allow tolerance of one cent
+            if (rawSum.subtract(enteredTotal)
+                      .abs()
+                      .compareTo(new BigDecimal("0.01")) > 0) {
+                JOptionPane.showMessageDialog(
+                    this,
+                    String.format(
+                        "Sum mismatch: items = $%.2f, total = $%.2f",
+                        rawSum.doubleValue(),
+                        enteredTotal.doubleValue()
+                    )
+                );
+                return;
+            }
+
             String buyer = (String) buyerBox.getSelectedItem();
             String store = storeField.getText().trim();
-            Date date = (Date) dateSpinner.getValue();
-            double total;
-            try {
-                total = Double.parseDouble(totalCostField.getText().trim());
-            } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(this, "Invalid total cost.");
-                return;
-            }
-            double sum = 0;
-            for (int i = 0; i < listModel.getSize(); i++) {
-                sum += listModel.get(i).getTotalCost();
-            }
-            if (Math.abs(sum - total) > 0.01) {
-                JOptionPane.showMessageDialog(this,
-                    String.format("Sum of item costs (%.2f) does not match total (%.2f).", sum, total));
-                return;
-            }
-            Purchase p = new Purchase(buyer, store, date, total);
-            for (int i = 0; i < listModel.getSize(); i++) {
-                p.addItem(listModel.get(i));
+            Date date   = (Date) dateSpinner.getValue();
+            Purchase p  = new Purchase(
+                buyer, store, date, enteredTotal.doubleValue()
+            );
+            for (int i = 0; i < itemModel.size(); i++) {
+                p.addItem(itemModel.get(i));
             }
             manager.addPurchase(p);
-            try {
-                DataStore.save(manager);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
-            JOptionPane.showMessageDialog(this, "Purchase saved.");
+            try { DataStore.save(manager); }
+            catch (IOException ex) { ex.printStackTrace(); }
+
+            JOptionPane.showMessageDialog(this, "Saved");
+            refreshView();
+            refreshSummary();
+
+            // reset fields
+            itemModel.clear();
+            updateSum.run();
             storeField.setText("");
-            totalCostField.setText("");
-            listModel.clear();
+            totalField.setText("");
         });
 
         return panel;
     }
 
-    /**
-     * Shows a dialog to add a single item to a purchase.
-     *
-     * @return the newly created Item, or null if cancelled
-     */
-    private Item showAddItemDialog() {
-        JDialog dialog = new JDialog(this, "Add Item", true);
-        dialog.setSize(400, 400);
-        dialog.setLayout(new GridLayout(0, 2, 5, 5));
-        dialog.setLocationRelativeTo(this);
 
-        dialog.add(new JLabel("Description:"));
-        JTextField descField = new JTextField();
-        dialog.add(descField);
+    // ----------------------------------------------------------------
+    // Dialog for adding/editing an item
+    // ----------------------------------------------------------------
+    private Item showAddItemDialog(Item old) {
+        JDialog dlg = new JDialog(
+            this, old == null ? "Add Item" : "Edit Item", true
+        );
+        dlg.setSize(400, 400);
+        dlg.setLayout(new GridLayout(0, 2, 5, 5));
+        dlg.setLocationRelativeTo(this);
 
-        dialog.add(new JLabel("Cost (pre-tax):"));
-        JTextField costField = new JTextField();
-        dialog.add(costField);
+        dlg.add(new JLabel("Description:"));
+        JTextField descF = new JTextField(
+            old != null ? old.getDescription() : ""
+        );
+        dlg.add(descF);
 
-        dialog.add(new JLabel("Tax Rate (e.g. 0.07):"));
-        JTextField taxField = new JTextField();
-        dialog.add(taxField);
+        dlg.add(new JLabel("Cost (pre-tax):"));
+        JTextField costF = new JTextField(
+            old != null ? String.valueOf(old.getCost()) : ""
+        );
+        dlg.add(costF);
 
-        dialog.add(new JLabel("Splits (must sum to 1.0):"));
-        dialog.add(new JLabel("Enter ratio per roommate:"));
+        dlg.add(new JLabel("Tax Rate:"));
+        JTextField taxF = new JTextField(
+            old != null ? String.valueOf(old.getTaxRate()) : ""
+        );
+        dlg.add(taxF);
 
-        Map<String, JCheckBox> checks = new HashMap<>();
-        Map<String, JTextField> ratioFields = new HashMap<>();
-        for (String name : PurchaseManager.ROOMMATES) {
+        dlg.add(new JLabel("Select roommates:"));
+        dlg.add(new JLabel());
+
+        Map<String, JCheckBox> cbs = new LinkedHashMap<>();
+        Map<String, JTextField> rfs = new LinkedHashMap<>();
+        for (String name : manager.getRoommates()) {
             JCheckBox cb = new JCheckBox(name);
-            JTextField rf = new JTextField("0.0");
+            JTextField rf = new JTextField();
             rf.setEnabled(false);
-            cb.addActionListener(e -> rf.setEnabled(cb.isSelected()));
-            dialog.add(cb);
-            dialog.add(rf);
-            checks.put(name, cb);
-            ratioFields.put(name, rf);
+            cbs.put(name, cb);
+            rfs.put(name, rf);
+            dlg.add(cb);
+            dlg.add(rf);
+            cb.addActionListener(e -> {
+                long sel = cbs.values().stream()
+                              .filter(JCheckBox::isSelected)
+                              .count();
+                if (sel > 0) {
+                    double v = 1.0 / sel;
+                    cbs.forEach((n, ch) -> {
+                        JTextField tf = rfs.get(n);
+                        if (ch.isSelected()) {
+                            tf.setText(String.format("%.4f", v));
+                            tf.setEnabled(true);
+                        } else {
+                            tf.setEnabled(false);
+                        }
+                    });
+                }
+            });
+        }
+
+        if (old != null) {
+            descF.setText(old.getDescription());
+            costF.setText(String.valueOf(old.getCost()));
+            taxF.setText(String.valueOf(old.getTaxRate()));
+            old.getSplits().forEach((n, ratio) -> {
+                JCheckBox cb = cbs.get(n);
+                JTextField rf = rfs.get(n);
+                cb.setSelected(true);
+                rf.setText(String.format("%.4f", ratio));
+                rf.setEnabled(true);
+            });
         }
 
         JButton ok = new JButton("OK");
-        dialog.add(new JLabel());
-        dialog.add(ok);
+        dlg.add(new JLabel());
+        dlg.add(ok);
 
         final Item[] result = new Item[1];
         ok.addActionListener(e -> {
-            String desc = descField.getText().trim();
+            String d = descF.getText().trim();
             double c, t;
             try {
-                c = Double.parseDouble(costField.getText().trim());
-                t = Double.parseDouble(taxField.getText().trim());
+                c = Double.parseDouble(costF.getText().trim());
+                t = Double.parseDouble(taxF.getText().trim());
             } catch (Exception ex) {
-                JOptionPane.showMessageDialog(dialog, "Invalid cost or tax.");
+                JOptionPane.showMessageDialog(dlg, "Invalid cost/tax");
                 return;
             }
-            Map<String, Double> splits = new HashMap<>();
-            double sum = 0;
-            for (String name : PurchaseManager.ROOMMATES) {
-                if (checks.get(name).isSelected()) {
-                    try {
-                        double v = Double.parseDouble(ratioFields.get(name).getText().trim());
-                        splits.put(name, v);
-                        sum += v;
-                    } catch (Exception ex) {
-                        JOptionPane.showMessageDialog(dialog, "Invalid split for " + name);
-                        return;
-                    }
+            Map<String, Double> split = new HashMap<>();
+            double s = 0;
+            for (String n : manager.getRoommates()) {
+                if (cbs.get(n).isSelected()) {
+                    double v = Double.parseDouble(rfs.get(n).getText());
+                    split.put(n, v);
+                    s += v;
                 }
             }
-            if (Math.abs(sum - 1.0) > 0.001) {
-                JOptionPane.showMessageDialog(dialog, "Splits must sum to 1.0");
+            if (Math.abs(s - 1.0) > 1e-3) {
+                JOptionPane.showMessageDialog(dlg, "Splits must sum to 1.0");
                 return;
             }
-            result[0] = new Item(desc, c, t, splits);
-            dialog.dispose();
+            result[0] = new Item(d, c, t, split);
+            dlg.dispose();
         });
 
-        dialog.setVisible(true);
+        dlg.setVisible(true);
         return result[0];
     }
 
-    /**
-     * Builds the panel for viewing, editing, and removing purchases.
-     *
-     * @return the View Purchases panel
-     */
+    // ----------------------------------------------------------------
+    // View Purchases panel with filter, export, print, edit/remove
+    // ----------------------------------------------------------------
     private JPanel createViewPurchasesPanel() {
         JPanel panel = new JPanel(new BorderLayout());
 
         String[] cols = {"Date", "Buyer", "Store", "Total"};
-        DefaultTableModel model = new DefaultTableModel(cols, 0) {
-            @Override public boolean isCellEditable(int row, int col) { return false; }
+        viewModel = new DefaultTableModel(cols, 0) {
+            @Override public boolean isCellEditable(int r, int c) {
+                return false;
+            }
         };
-        JTable table = new JTable(model);
+        viewTable = new JTable(viewModel);
+        sorter   = new TableRowSorter<>(viewModel);
+        viewTable.setRowSorter(sorter);
+
+        panel.add(new JScrollPane(viewTable), BorderLayout.CENTER);
+
+        JPanel north = new JPanel();
+        north.add(new JLabel("Filter:"));
+        JTextField filt = new JTextField(20);
+        north.add(filt);
+        filt.getDocument().addDocumentListener((SimpleDocumentListener)() -> {
+            String t = filt.getText();
+            sorter.setRowFilter(
+                t.isEmpty()
+                    ? null
+                    : RowFilter.regexFilter("(?i)" + t)
+            );
+        });
+        panel.add(north, BorderLayout.NORTH);
+
+        JPanel south = new JPanel(new BorderLayout());
+        JTextArea det = new JTextArea();
+        det.setEditable(false);
+        south.add(new JScrollPane(det), BorderLayout.CENTER);
+
+        JPanel ctrls = new JPanel();
+        JButton exp = new JButton("Export CSV");
+        JButton pr  = new JButton("Print");
+        JButton rem = new JButton("Remove Purchase");
+        JButton edt = new JButton("Edit Purchase");
+        ctrls.add(exp);
+        ctrls.add(pr);
+        ctrls.add(rem);
+        ctrls.add(edt);
+        south.add(ctrls, BorderLayout.SOUTH);
+
+        panel.add(south, BorderLayout.SOUTH);
+
+        refreshView();
+
+        viewTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int rv = viewTable.getSelectedRow();
+                if (rv >= 0) {
+                    int mi = viewTable.convertRowIndexToModel(rv);
+                    Purchase pu = manager.getPurchases().get(mi);
+                    StringBuilder sb = new StringBuilder("Items:\n");
+                    for (Item it : pu.getItems()) {
+                        sb.append(String.format(
+                            "- %s: $%.2f, splits %s\n",
+                            it.getDescription(),
+                            it.getTotalCost(),
+                            it.getSplits()
+                        ));
+                    }
+                    det.setText(sb.toString());
+                }
+            }
+        });
+
+        exp.addActionListener(e -> {
+            JFileChooser fc = new JFileChooser();
+            if (fc.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+                try {
+                    ExportUtil.exportToCSV(
+                      manager, fc.getSelectedFile()
+                    );
+                    JOptionPane.showMessageDialog(this, "Exported");
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        });
+
+        pr.addActionListener(e -> {
+            try {
+                viewTable.print();
+            } catch (PrinterException ex) {
+                ex.printStackTrace();
+            }
+        });
+
+        rem.addActionListener(e -> {
+            int row = viewTable.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(this, "No purchase selected.");
+                return;
+            }
+            int mr = viewTable.convertRowIndexToModel(row);
+            int choice = JOptionPane.showConfirmDialog(
+                this, "Delete this purchase?", 
+                "Confirm Delete", JOptionPane.YES_NO_OPTION
+            );
+            if (choice == JOptionPane.YES_OPTION) {
+                manager.removePurchase(mr);
+                try { DataStore.save(manager); }
+                catch (IOException ex) { ex.printStackTrace(); }
+                refreshView();
+                det.setText("");
+            }
+        });
+
+        edt.addActionListener(e -> {
+            int row = viewTable.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(this, "No purchase selected.");
+                return;
+            }
+            int mr = viewTable.convertRowIndexToModel(row);
+            Purchase p = manager.getPurchases().get(mr);
+            showEditPurchaseDialog(p, viewModel, mr);
+            refreshView();
+        });
+
+        return panel;
+    }
+
+    // ----------------------------------------------------------------
+    // Dialog to edit existing purchase including items
+    // ----------------------------------------------------------------
+    private void showEditPurchaseDialog(
+        Purchase p, DefaultTableModel model, int row
+    ) {
+        JDialog dialog = new JDialog(this, "Edit Purchase", true);
+        dialog.setSize(500, 600);
+        dialog.setLayout(new BorderLayout());
+
+        JPanel form = new JPanel(new GridLayout(5, 2, 5, 5));
+        form.setBorder(BorderFactory.createEmptyBorder(10,10,10,10));
+        form.add(new JLabel("Buyer:"));
+        JComboBox<String> buyerBox = new JComboBox<>(
+            manager.getRoommates().toArray(new String[0])
+        );
+        buyerBox.setSelectedItem(p.getBuyer());
+        form.add(buyerBox);
+
+        form.add(new JLabel("Store:"));
+        JTextField storeF = new JTextField(p.getStore());
+        form.add(storeF);
+
+        form.add(new JLabel("Date:"));
+        JSpinner dateSp = new JSpinner(
+            new SpinnerDateModel(p.getDate(), null, null,
+            Calendar.DAY_OF_MONTH)
+        );
+        dateSp.setEditor(
+            new JSpinner.DateEditor(dateSp, "yyyy-MM-dd")
+        );
+        form.add(dateSp);
+
+        form.add(new JLabel("Total Cost:"));
+        JTextField totalF = new JTextField(
+            String.format("%.2f", p.getTotalCost())
+        );
+        form.add(totalF);
+
+        dialog.add(form, BorderLayout.NORTH);
+
+        DefaultListModel<Item> im = new DefaultListModel<>();
+        p.getItems().forEach(im::addElement);
+        JList<Item> list = new JList<>(im);
+        list.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(
+                    JList<?> l, Object v, int idx, boolean sel, boolean fok
+            ) {
+                super.getListCellRendererComponent(l, v, idx, sel, fok);
+                Item it = (Item) v;
+                setText(
+                    it.getDescription() +
+                    " ($" + String.format("%.2f", it.getTotalCost()) + ")"
+                );
+                return this;
+            }
+        });
+        dialog.add(new JScrollPane(list), BorderLayout.CENTER);
+
+        // Combine item controls + save/cancel
+        JPanel bottom = new JPanel(new BorderLayout());
+        JPanel itemCtrls = new JPanel();
+        JButton addI  = new JButton("Add Item");
+        JButton editI = new JButton("Edit Item");
+        JButton remI  = new JButton("Remove Item");
+        itemCtrls.add(addI);
+        itemCtrls.add(editI);
+        itemCtrls.add(remI);
+        bottom.add(itemCtrls, BorderLayout.NORTH);
+
+        JPanel saveP = new JPanel();
+        JButton saveB   = new JButton("Save");
+        JButton cancelB = new JButton("Cancel");
+        saveP.add(saveB);
+        saveP.add(cancelB);
+        bottom.add(saveP, BorderLayout.SOUTH);
+
+        dialog.add(bottom, BorderLayout.SOUTH);
+
+        addI.addActionListener(ae -> {
+            Item it = showAddItemDialog(null);
+            if (it != null) im.addElement(it);
+        });
+        editI.addActionListener(ae -> {
+            int i = list.getSelectedIndex();
+            if (i < 0) return;
+            Item old = im.get(i);
+            Item rep = showAddItemDialog(old);
+            if (rep != null) im.set(i, rep);
+        });
+        remI.addActionListener(ae -> {
+            int i = list.getSelectedIndex();
+            if (i >= 0) im.remove(i);
+        });
+
+        saveB.addActionListener(ae -> {
+            p.setBuyer((String) buyerBox.getSelectedItem());
+            p.setStore(storeF.getText().trim());
+            p.setDate((Date) dateSp.getValue());
+            double tot;
+            try {
+                tot = Double.parseDouble(totalF.getText().trim());
+            } catch(Exception ex) {
+                JOptionPane.showMessageDialog(dialog,"Invalid total cost");
+                return;
+            }
+            p.getItems().clear();
+            for (int i = 0; i < im.size(); i++) {
+                p.addItem(im.get(i));
+            }
+            p.setTotalCost(tot);
+
+            try { DataStore.save(manager); } catch(IOException ex) { ex.printStackTrace(); }
+
+            SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+            model.setValueAt(df.format(p.getDate()), row, 0);
+            model.setValueAt(p.getBuyer(), row, 1);
+            model.setValueAt(p.getStore(), row, 2);
+            model.setValueAt(
+                String.format("%.2f", p.getTotalCost()), row, 3
+            );
+
+            dialog.dispose();
+        });
+        cancelB.addActionListener(ae -> dialog.dispose());
+
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    // ----------------------------------------------------------------
+    // Summary panel with date-range settlement
+    // ----------------------------------------------------------------
+    private JPanel createSummaryPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        JTextArea sum = new JTextArea();
+        sum.setEditable(false);
+        panel.add(new JScrollPane(sum), BorderLayout.CENTER);
+
+        JPanel top = new JPanel();
+        top.add(new JLabel("From:"));
+        JSpinner f = new JSpinner(new SpinnerDateModel());
+        ((JSpinner.DateEditor)f.getEditor())
+            .getFormat().applyPattern("yyyy-MM-dd");
+        top.add(f);
+
+        top.add(new JLabel("To:"));
+        JSpinner t = new JSpinner(new SpinnerDateModel());
+        ((JSpinner.DateEditor)t.getEditor())
+            .getFormat().applyPattern("yyyy-MM-dd");
+        top.add(t);
+
+        JButton g = new JButton("Generate");
+        top.add(g);
+        panel.add(top, BorderLayout.NORTH);
+
+        g.addActionListener(e ->
+            sum.setText(computeSettlement(
+                (Date)f.getValue(), (Date)t.getValue()
+            ))
+        );
+        g.doClick();
+
+        return panel;
+    }
+
+    // ----------------------------------------------------------------
+    // Settings panel for managing roommates
+    // ----------------------------------------------------------------
+    private JPanel createSettingsPanel() {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        DefaultListModel<String> rmModel = new DefaultListModel<>();
+        manager.getRoommates().forEach(rmModel::addElement);
+        JList<String> rmList = new JList<>(rmModel);
+        panel.add(new JScrollPane(rmList), BorderLayout.CENTER);
+
+        JPanel ctrls = new JPanel();
+        JButton add = new JButton("Add");
+        JButton rem = new JButton("Remove");
+        ctrls.add(add);
+        ctrls.add(rem);
+        panel.add(ctrls, BorderLayout.SOUTH);
+
+        add.addActionListener(e -> {
+            String name = JOptionPane.showInputDialog(this, "Name:");
+            if (name != null && !name.trim().isEmpty()) {
+                manager.addRoommate(name);
+                rmModel.addElement(name);
+                try { DataStore.save(manager); }
+                catch (IOException ex) { ex.printStackTrace(); }
+            }
+        });
+        rem.addActionListener(e -> {
+            int idx = rmList.getSelectedIndex();
+            if (idx >= 0) {
+                String name = rmModel.remove(idx);
+                manager.removeRoommate(name);
+                try { DataStore.save(manager); }
+                catch (IOException ex) { ex.printStackTrace(); }
+            }
+        });
+
+        return panel;
+    }
+
+    // ----------------------------------------------------------------
+    // Helpers
+    // ----------------------------------------------------------------
+    private void refreshView() {
+        viewModel.setRowCount(0);
         SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
         for (Purchase p : manager.getPurchases()) {
-            model.addRow(new Object[]{
+            viewModel.addRow(new Object[]{
                 df.format(p.getDate()),
                 p.getBuyer(),
                 p.getStore(),
                 String.format("%.2f", p.getTotalCost())
             });
         }
-        panel.add(new JScrollPane(table), BorderLayout.CENTER);
+    }
 
-        JTextArea details = new JTextArea(6, 40);
-        details.setEditable(false);
-        JScrollPane detailsScroll = new JScrollPane(details);
+    private void refreshSummary() {
+        // no-op
+    }
 
-        JPanel controls = new JPanel();
-        JButton editBtn = new JButton("Edit Selected");
-        JButton removeBtn = new JButton("Remove Selected");
-        controls.add(editBtn);
-        controls.add(removeBtn);
-
-        JPanel south = new JPanel(new BorderLayout());
-        south.add(detailsScroll, BorderLayout.CENTER);
-        south.add(controls, BorderLayout.SOUTH);
-        panel.add(south, BorderLayout.SOUTH);
-
-        // Show details on selection
-        table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                int idx = table.getSelectedRow();
-                if (idx >= 0) {
-                    Purchase p = manager.getPurchases().get(idx);
-                    StringBuilder sb = new StringBuilder("Items:");
-                    for (Item it : p.getItems()) {
-                        sb.append(String.format(
-                            "- %s: pre-tax $%.2f, tax %.2f, total $%.2f, splits %s",
-                                it.getDescription(), it.getCost(), it.getTaxRate(),
-                                    it.getTotalCost(), it.getSplits()));
+    /**
+     * Computes settlement instructions between roommates over a date range.
+     */
+    private String computeSettlement(Date from, Date to) {
+        Map<String, Double> net = new HashMap<>();
+        for (String r : manager.getRoommates()) {
+            net.put(r, 0.0);
+        }
+        for (Purchase p : manager.getPurchases()) {
+            if (!p.getDate().before(from) && !p.getDate().after(to)) {
+                for (Item it : p.getItems()) {
+                    for (Map.Entry<String, Double> e : it.getSplits().entrySet()) {
+                        net.put(
+                            e.getKey(),
+                            net.get(e.getKey())
+                            - e.getValue() * it.getTotalCost()
+                        );
                     }
-                    details.setText(sb.toString());
                 }
+                net.put(
+                    p.getBuyer(),
+                    net.get(p.getBuyer()) + p.getTotalCost()
+                );
             }
-        });
+        }
+        java.util.List<String> debtors   = new java.util.ArrayList<>();
+        java.util.List<String> creditors = new java.util.ArrayList<>();
+        for (Map.Entry<String, Double> e : net.entrySet()) {
+            if (e.getValue() < -1e-2) debtors.add(e.getKey());
+            else if (e.getValue() >  1e-2) creditors.add(e.getKey());
+        }
 
-        return panel;
+        StringBuilder sb = new StringBuilder("Settlements:\n");
+        int i = 0, j = 0;
+        while (i < debtors.size() && j < creditors.size()) {
+            String d = debtors.get(i), c = creditors.get(j);
+            double owe = -net.get(d), cred = net.get(c);
+            double amt = Math.min(owe, cred);
+            sb.append(String.format("%s pays %s $%.3f\n", d, c, amt));
+            net.put(d, net.get(d) + amt);
+            net.put(c, net.get(c) - amt);
+            if (Math.abs(net.get(d)) < 1e-2) i++;
+            if (Math.abs(net.get(c)) < 1e-2) j++;
+        }
+        return sb.toString();
     }
 
-    /**
-     * Dialog for editing an existing purchase.
-     *
-     * @param p     The Purchase to edit.
-     * @param model The table model to refresh.
-     * @param row   The row index in the table.
-     */
-    private void showEditPurchaseDialog(Purchase p, DefaultTableModel model, int row) {
-        JDialog dialog = new JDialog(this, "Edit Purchase", true);
-        dialog.setSize(500, 600);
-        dialog.setLayout(new BorderLayout());
-
-        // Top form
-        JPanel form = new JPanel(new GridLayout(5, 2, 5, 5));
-        form.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        form.add(new JLabel("Buyer:"));
-        JComboBox<String> buyerBox = new JComboBox<>(PurchaseManager.ROOMMATES);
-        buyerBox.setSelectedItem(p.getBuyer());
-        form.add(buyerBox);
-
-        form.add(new JLabel("Store:"));
-        JTextField storeField = new JTextField(p.getStore());
-        form.add(storeField);
-
-        form.add(new JLabel("Date:"));
-        JSpinner dateSpinner = new JSpinner(new SpinnerDateModel(p.getDate(), null, null, java.util.Calendar.DAY_OF_MONTH));
-        dateSpinner.setEditor(new JSpinner.DateEditor(dateSpinner, "yyyy-MM-dd"));
-        form.add(dateSpinner);
-
-        form.add(new JLabel("Total Cost:"));
-        JTextField totalField = new JTextField(String.format("%.2f", p.getTotalCost()));
-        form.add(totalField);
-
-        dialog.add(form, BorderLayout.NORTH);
-
-        // Center: item list
-        DefaultListModel<Item> itemModel = new DefaultListModel<>();
-        p.getItems().forEach(itemModel::addElement);
-        JList<Item> itemList = new JList<>(itemModel);
-        itemList.setCellRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int idx, boolean sel, boolean fok) {
-                super.getListCellRendererComponent(list, value, idx, sel, fok);
-                Item it = (Item)value;
-                setText(it.getDescription() + " ($" + String.format("%.2f", it.getTotalCost()) + ")");
-                return this;
-            }
-        });
-        dialog.add(new JScrollPane(itemList), BorderLayout.CENTER);
-
-        // Item controls
-        JPanel itemCtrls = new JPanel();
-        JButton addItem = new JButton("Add Item");
-        JButton editItem = new JButton("Edit Item");
-        JButton remItem = new JButton("Remove Item");
-        itemCtrls.add(addItem); itemCtrls.add(editItem); itemCtrls.add(remItem);
-        dialog.add(itemCtrls, BorderLayout.SOUTH);
-
-        // Item actions
-        addItem.addActionListener(ae -> {
-            Item it = showAddItemDialog();
-            if (it != null) itemModel.addElement(it);
-        });
-        editItem.addActionListener(ae -> {
-            int i = itemList.getSelectedIndex();
-            if (i<0) return;
-            Item old = itemModel.get(i);
-            Item rep = showAddItemDialogWithValues(old);
-            if (rep!=null) itemModel.set(i, rep);
-        });
-        remItem.addActionListener(ae -> {
-            int i = itemList.getSelectedIndex();
-            if (i>=0) itemModel.remove(i);
-        });
-
-        // Save/Cancel
-        JPanel saveP = new JPanel();
-        JButton save = new JButton("Save");
-        JButton cancel = new JButton("Cancel");
-        saveP.add(save); saveP.add(cancel);
-        dialog.add(saveP, BorderLayout.PAGE_END);
-
-        save.addActionListener(ae -> {
-            p.setBuyer((String)buyerBox.getSelectedItem());
-            p.setStore(storeField.getText().trim());
-            p.setDate((Date)dateSpinner.getValue());
-            double tot;
-            try { tot = Double.parseDouble(totalField.getText().trim()); }
-            catch(Exception ex){ JOptionPane.showMessageDialog(dialog,"Invalid total cost"); return;} 
-            p.getItems().clear();
-            for (int i=0; i<itemModel.getSize(); i++){ p.getItems().add(itemModel.get(i));}
-            p.setTotalCost(tot);
-            try { DataStore.save(manager);} catch(Exception ex){ex.printStackTrace();}
-            SimpleDateFormat dfmt = new SimpleDateFormat("yyyy-MM-dd");
-            model.setValueAt(dfmt.format(p.getDate()), row,0);
-            model.setValueAt(p.getBuyer(), row,1);
-            model.setValueAt(p.getStore(), row,2);
-            model.setValueAt(String.format("%.2f",p.getTotalCost()),row,3);
-            dialog.dispose();
-        });
-        cancel.addActionListener(ae -> dialog.dispose());
-
-        dialog.setLocationRelativeTo(this);
-        dialog.setVisible(true);
-    }
-
-    /**
-     * Variant of showAddItemDialog that pre-populates fields from an existing Item.
-     * @param old the Item to edit
-     * @return the updated Item
-     */
-    private Item showAddItemDialogWithValues(Item old) {
-        // For brevity, use the same dialog and ignore seeding, or implement similar to showAddItemDialog
-        return showAddItemDialog();
-    }
-
-    /**
-     * Builds the summary panel for each roommate.
-     *
-     * @return the Summary panel
-     */
-    private JPanel createSummaryPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        String[] cols = {"Roommate","Paid","Owed","Balance"};
-        DefaultTableModel model = new DefaultTableModel(cols,0){@Override public boolean isCellEditable(int r,int c){return false;}};
-        JTable table = new JTable(model);
-        panel.add(new JScrollPane(table), BorderLayout.CENTER);
-
-        JButton refresh = new JButton("Refresh");
-        panel.add(refresh, BorderLayout.SOUTH);
-        refresh.addActionListener(e -> {
-            model.setRowCount(0);
-            for (String name:PurchaseManager.ROOMMATES) {
-                double paid=0, owed=0;
-                for (Purchase p:manager.getPurchases()){
-                    if(p.getBuyer().equals(name)) paid+=p.getTotalCost();
-                    for(Item it:p.getItems()){Double sh=it.getSplits().get(name); if(sh!=null) owed+=sh*it.getTotalCost();}
-                }
-                model.addRow(new Object[]{name,String.format("%.2f",paid),String.format("%.2f",owed),String.format("%.2f",paid-owed)});
-            }
-        });
-        refresh.doClick();
-
-        return panel;
-    }
-
-    /**
-     * Launches the application.
-     *
-     * @param args ignored
-     */
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new MainApp().setVisible(true));
     }

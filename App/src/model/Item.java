@@ -29,30 +29,18 @@ public class Item implements Serializable {
         this.splits = new HashMap<>(splits);
     }
 
-    /**
-     * @return the item description.
-     */
     public String getDescription() {
         return description;
     }
 
-    /**
-     * @return the pre-tax cost.
-     */
     public double getCost() {
         return cost;
     }
 
-    /**
-     * @return the tax rate.
-     */
     public double getTaxRate() {
         return taxRate;
     }
 
-    /**
-     * @return the map of roommate splits.
-     */
     public Map<String, Double> getSplits() {
         return splits;
     }
