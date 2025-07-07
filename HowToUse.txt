@@ -2,7 +2,7 @@
 git bash compile and run commands:
 *first cd to proper location
 
-    javac -d bin src/model/*.java src/util/*.java src/app/MainApp.java
+    javac -cp "lib/*" -d bin src/model/*.java src/util/*.java src/app/MainApp.java
     java -cp bin app.MainApp
     
     to run server: 
