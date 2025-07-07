@@ -1,7 +1,7 @@
 package app;
 
 import model.*;
-import util.DataStore;
+import util.RemoteDataStore;
 import util.ExportUtil;
 
 import javax.swing.*;
@@ -40,7 +40,7 @@ public class MainApp extends JFrame {
 
     public MainApp() {
         super("Roommate Expense Tracker");
-        manager = DataStore.load();
+        manager = RemoteDataStore.load();
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setSize(1000, 700);
         initUI();
@@ -217,8 +217,8 @@ public class MainApp extends JFrame {
                 p.addItem(itemModel.get(i));
             }
             manager.addPurchase(p);
-            try { DataStore.save(manager); }
-            catch (IOException ex) { ex.printStackTrace(); }
+            try { RemoteDataStore.save(manager); }
+            catch (Exception ex) { ex.printStackTrace(); }
 
             JOptionPane.showMessageDialog(this, "Saved");
             refreshView();
@@ -425,7 +425,7 @@ public class MainApp extends JFrame {
                       manager, fc.getSelectedFile()
                     );
                     JOptionPane.showMessageDialog(this, "Exported");
-                } catch (IOException ex) {
+                } catch (Exception ex) {
                     ex.printStackTrace();
                 }
             }
@@ -452,8 +452,8 @@ public class MainApp extends JFrame {
             );
             if (choice == JOptionPane.YES_OPTION) {
                 manager.removePurchase(mr);
-                try { DataStore.save(manager); }
-                catch (IOException ex) { ex.printStackTrace(); }
+                try { RemoteDataStore.save(manager); }
+                catch (Exception ex) { ex.printStackTrace(); }
                 refreshView();
                 det.setText("");
             }
@@ -587,7 +587,7 @@ public class MainApp extends JFrame {
             }
             p.setTotalCost(tot);
 
-            try { DataStore.save(manager); } catch(IOException ex) { ex.printStackTrace(); }
+            try { RemoteDataStore.save(manager); } catch (Exception ex) { ex.printStackTrace(); }
 
             SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
             model.setValueAt(df.format(p.getDate()), row, 0);
@@ -665,8 +665,8 @@ public class MainApp extends JFrame {
             if (name != null && !name.trim().isEmpty()) {
                 manager.addRoommate(name);
                 rmModel.addElement(name);
-                try { DataStore.save(manager); }
-                catch (IOException ex) { ex.printStackTrace(); }
+                try { RemoteDataStore.save(manager); }
+                catch (Exception ex) { ex.printStackTrace(); }
             }
         });
         rem.addActionListener(e -> {
@@ -674,8 +674,8 @@ public class MainApp extends JFrame {
             if (idx >= 0) {
                 String name = rmModel.remove(idx);
                 manager.removeRoommate(name);
-                try { DataStore.save(manager); }
-                catch (IOException ex) { ex.printStackTrace(); }
+                try { RemoteDataStore.save(manager); }
+                catch (Exception ex) { ex.printStackTrace(); }
             }
         });
 
