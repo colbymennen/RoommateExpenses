@@ -1,27 +1,27 @@
 package model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Represents an item in a purchase with description, pre-tax cost, tax rate,
- * and split ratios among roommates.
+ * Represents a single line‐item in a Purchase.
+ * Jackson will ignore any JSON fields we don’t explicitly model.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Item implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    private Long id;
     private String description;
     private double cost;
     private double taxRate;
-    private Map<String, Double> splits;
+    private Map<String, Double> splits = new HashMap<>();
 
-    /**
-     * Constructs an Item with the given parameters.
-     *
-     * @param description A human-readable description of the item.
-     * @param cost        Pre-tax cost of the item.
-     * @param taxRate     Tax rate (e.g., 0.07 for 7% tax).
-     * @param splits      Map of roommate names to their share ratios.
-     */
+    /** Jackson needs this. */
+    public Item() { }
+
     public Item(String description, double cost, double taxRate, Map<String, Double> splits) {
         this.description = description;
         this.cost = cost;
@@ -29,25 +29,22 @@ public class Item implements Serializable {
         this.splits = new HashMap<>(splits);
     }
 
-    public String getDescription() {
-        return description;
-    }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public double getCost() {
-        return cost;
-    }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
-    public double getTaxRate() {
-        return taxRate;
-    }
+    public double getCost() { return cost; }
+    public void setCost(double cost) { this.cost = cost; }
 
-    public Map<String, Double> getSplits() {
-        return splits;
-    }
+    public double getTaxRate() { return taxRate; }
+    public void setTaxRate(double taxRate) { this.taxRate = taxRate; }
 
-    /**
-     * @return total cost including tax.
-     */
+    public Map<String, Double> getSplits() { return splits; }
+    public void setSplits(Map<String, Double> splits) { this.splits = splits; }
+
+    /** convenience—cost + tax (not used for JSON) */
     public double getTotalCost() {
         return cost * (1 + taxRate);
     }

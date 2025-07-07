@@ -17,9 +17,6 @@ public class Item {
     private double cost;
     private double taxRate;
 
-    /**
-     * Map of roommate → split ratio (e.g. 0.25, 0.50, etc.)
-     */
     @ElementCollection
     @CollectionTable(
         name = "item_splits",
@@ -38,49 +35,22 @@ public class Item {
         this.splits = new HashMap<>(splits);
     }
 
-    public Long getId() {
-        return id;
-    }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    public String getDescription() { return description; }
+    public void setDescription(String description) { this.description = description; }
 
-    public String getDescription() {
-        return description;
-    }
+    public double getCost() { return cost; }
+    public void setCost(double cost) { this.cost = cost; }
 
-    public void setDescription(String description) {
-        this.description = description;
-    }
+    public double getTaxRate() { return taxRate; }
+    public void setTaxRate(double taxRate) { this.taxRate = taxRate; }
 
-    public double getCost() {
-        return cost;
-    }
+    public Map<String, Double> getSplits() { return splits; }
+    public void setSplits(Map<String, Double> splits) { this.splits = splits; }
 
-    public void setCost(double cost) {
-        this.cost = cost;
-    }
-
-    public double getTaxRate() {
-        return taxRate;
-    }
-
-    public void setTaxRate(double taxRate) {
-        this.taxRate = taxRate;
-    }
-
-    public Map<String, Double> getSplits() {
-        return splits;
-    }
-
-    public void setSplits(Map<String, Double> splits) {
-        this.splits = splits;
-    }
-
-    /**
-     * @return total cost including tax
-     */
+    /** @return total cost including tax */
     public double getTotalCost() {
         return cost * (1 + taxRate);
     }

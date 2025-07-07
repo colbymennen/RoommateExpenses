@@ -35,59 +35,24 @@ public class Purchase {
         this.totalCost = totalCost;
     }
 
-    public Long getId() {
-        return id;
-    }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
+    public String getBuyer() { return buyer; }
+    public void setBuyer(String buyer) { this.buyer = buyer; }
 
-    public String getBuyer() {
-        return buyer;
-    }
+    public String getStore() { return store; }
+    public void setStore(String store) { this.store = store; }
 
-    public void setBuyer(String buyer) {
-        this.buyer = buyer;
-    }
+    public Date getDate() { return date; }
+    public void setDate(Date date) { this.date = date; }
 
-    public String getStore() {
-        return store;
-    }
+    public double getTotalCost() { return totalCost; }
+    public void setTotalCost(double totalCost) { this.totalCost = totalCost; }
 
-    public void setStore(String store) {
-        this.store = store;
-    }
+    public List<Item> getItems() { return items; }
+    public void setItems(List<Item> items) { this.items = items; }
 
-    public Date getDate() {
-        return date;
-    }
-
-    public void setDate(Date date) {
-        this.date = date;
-    }
-
-    public double getTotalCost() {
-        return totalCost;
-    }
-
-    public void setTotalCost(double totalCost) {
-        this.totalCost = totalCost;
-    }
-
-    public List<Item> getItems() {
-        return items;
-    }
-
-    public void setItems(List<Item> items) {
-        this.items = items;
-    }
-
-    public void addItem(Item item) {
-        items.add(item);
-    }
-
-    public void removeItem(Item item) {
-        items.remove(item);
-    }
+    public void addItem(Item item) { items.add(item); }
+    public void removeItem(Item item) { items.remove(item); }
 }
