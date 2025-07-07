@@ -12,3 +12,10 @@ text editors will sometimes make
 **/.DS_Store
 # This rule ignores the notepad++ .bak files
 **/*.bak
+# Ignore H2 database files
+/data/
+*.mv.db
+*.trace.db
+# H2 Database files
+App/roommate-service/data/
+App/roommate-service/data/*.mv.db
