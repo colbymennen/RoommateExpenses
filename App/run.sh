@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -e
+# cd to the script’s directory
+cd "$(dirname "$0")"
 
-# 1) Make sure bin/ exists
+# Ensure bin/ exists
 mkdir -p bin
 
-# 2) Compile all your code
+# Compile all Java sources
 javac -cp "lib/*" -d bin \
-    src/model/*.java \
-    src/util/*.java \
-    src/app/MainApp.java
+  src/model/*.java \
+  src/util/*.java \
+  src/app/MainApp.java
 
-# 3) Launch the application
-java -cp "lib/*;bin" app.MainApp
+# Launch the app
+java -cp "lib/*:bin" app.MainApp
